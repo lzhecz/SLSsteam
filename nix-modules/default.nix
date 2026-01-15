@@ -15,6 +15,7 @@ pkgs.pkgsi686Linux.stdenv.mkDerivation {
   ];
 
   buildInputs = with pkgs.pkgsi686Linux; [
+    curl
     openssl
     which
   ];
