@@ -10,6 +10,7 @@
 #include "sdk/CAppOwnershipInfo.hpp"
 #include "sdk/CProtoBufMsgBase.hpp"
 #include "sdk/CSteamEngine.hpp"
+#include "sdk/CSteamMatchmakingServers.hpp"
 #include "sdk/CUser.hpp"
 #include "sdk/EResult.hpp"
 #include "sdk/IClientUser.hpp"
@@ -193,46 +194,6 @@ static uint32_t hkProtoBufMsgBase_Send(CProtoBufMsgBase* pMsg)
 	return ret;
 }
 
-static void hkSteamController_AddToConfigCacheHandler(void* pSteamController, uint32_t controllerIdx, uint32_t appId, uint32_t a3, uint32_t a4, uint32_t a5, uint32_t a6, uint32_t a7)
-{
-	FakeAppIds::overwriteAppIdIfNecessary(appId);
-
-	g_pLog->debug
-	(
-		"%s(%p, %u, %u, %u, %u, %u, %u, %u)\n",
-
-		Hooks::CSteamController_AddToConfigCacheHandler.name.c_str(),
-		pSteamController,
-		controllerIdx,
-		appId,
-		a3,
-		a4,
-		a5,
-		a6,
-		a7
-	);
-
-	return Hooks::CSteamController_AddToConfigCacheHandler.tramp.fn(pSteamController, controllerIdx, appId, a3, a4, a5, a6, a7);
-}
-
-static void hkSteamController_QueueControllerActivation(void* pSteamController, uint32_t controllerIdx, uint32_t appId, uint8_t a3)
-{
-	FakeAppIds::overwriteAppIdIfNecessary(appId);
-
-	g_pLog->debug
-	(
-		"%s(%p, %u, %u, %u, %u, %u)\n",
-
-		Hooks::CSteamController_QueueControllerActivation.name.c_str(),
-		pSteamController,
-		controllerIdx,
-		appId,
-		a3
-	);
-
-	Hooks::CSteamController_QueueControllerActivation.tramp.fn(pSteamController, controllerIdx, appId, a3);
-}
-
 static void hkSteamEngine_Init(void* pSteamEngine)
 {
 	Hooks::CSteamEngine_Init.tramp.fn(pSteamEngine);
@@ -285,6 +246,53 @@ static uint32_t hkSteamEngine_SetAppIdForCurrentPipe(void* pSteamEngine, uint32_
 	);
 
 	return ret;
+}
+
+static gameserverdetails_t* hkSteamMatchmakingServers_GetServerDetails(void* pSteamMatchmakingServers, uint32_t handle, uint32_t serverIdx)
+{
+	gameserverdetails_t* ret = Hooks::CSteamMatchmakingServers_GetServerDetails.tramp.fn(pSteamMatchmakingServers, handle, serverIdx);
+
+	g_pLog->debug
+	(
+		"%s(%p, %p, %u) -> %p\n",
+
+		Hooks::CSteamMatchmakingServers_GetServerDetails.name.c_str(),
+		pSteamMatchmakingServers,
+		handle,
+		serverIdx,
+		ret
+	);
+
+	if(ret)
+	{
+		FakeAppIds::getServerDetails(handle, *ret);
+	}
+
+	return ret;
+}
+
+static uint32_t hkSteamMatchmakingServers_RequestInternetServerList(void* pSteamMatchmakingServers, uint32_t appId, uint32_t a2, uint32_t a3, uint32_t a4)
+{
+	const uint32_t fake = FakeAppIds::requestInternetServerList(appId);
+
+	uint32_t handle = Hooks::CSteamMatchmakingServers_RequestInternetServerList.tramp.fn(pSteamMatchmakingServers, fake ? fake : appId, a2, a3, a4);
+
+	g_pLog->debug
+	(
+		"%s(%p, %u, %p, %p, %p)->%p\n",
+
+		Hooks::CSteamMatchmakingServers_RequestInternetServerList.name.c_str(),
+		pSteamMatchmakingServers,
+		appId,
+		a2,
+		a3,
+		a4,
+		handle
+	);
+
+	FakeAppIds::fakeAppIdMapServer[handle] = appId;
+
+	return handle;
 }
 
 __attribute__((hot))
@@ -466,6 +474,8 @@ static unsigned int hkClientApps_GetDLCCount(void* pClientApps, uint32_t appId)
 		appId,
 		count
 	);
+	
+	appId = FakeAppIds::getRealAppIdForCurrentPipe();
 
 	const uint32_t override = DLC::getDlcCount(appId);
 	if (override)
@@ -478,6 +488,8 @@ static unsigned int hkClientApps_GetDLCCount(void* pClientApps, uint32_t appId)
 
 static bool hkClientApps_GetDLCDataByIndex(void* pClientApps, uint32_t appId, int dlcIndex, uint32_t* pDlcId, bool* pIsAvailable, char* pChDlcName, size_t dlcNameLen)
 {
+	appId = FakeAppIds::getRealAppIdForCurrentPipe();
+
 	//Preserve original call to populate stuff
 	const bool ret = DLC::getDlcDataByIndex(appId, dlcIndex, pDlcId, pIsAvailable, pChDlcName, dlcNameLen)
 		|| Hooks::IClientApps_GetDLCDataByIndex.originalFn.fn(pClientApps, appId, dlcIndex, pDlcId, pIsAvailable, pChDlcName, dlcNameLen);
@@ -526,13 +538,6 @@ static void hkClientApps_PipeLoop(void* pClientApps, void* a1, void* a2, void* a
 	Hooks::IClientApps_PipeLoop.tramp.fn(pClientApps, a1, a2, a3);
 }
 
-static void hkClientControllerSerialized_PipeLoop(void* pClientControllerSerialized, void* a1, void* a2, void* a3)
-{
-	FakeAppIds::pipeLoop(false);
-	Hooks::IClientControllerSerialized_PipeLoop.tramp.fn(pClientControllerSerialized, a1, a2, a3);
-	FakeAppIds::pipeLoop(true);
-}
-
 static bool hkClientRemoteStorage_IsCloudEnabledForApp(void* pClientRemoteStorage, uint32_t appId)
 {
 	const bool enabled = Hooks::IClientRemoteStorage_IsCloudEnabledForApp.originalFn.fn(pClientRemoteStorage, appId);
@@ -572,6 +577,7 @@ static void hkClientRemoteStorage_PipeLoop(void* pClientRemoteStorage, void* a1,
 		hooked = true;
 	}
 	
+	//Cloud & Workshop
 	FakeAppIds::pipeLoop(false);
 	Hooks::IClientRemoteStorage_PipeLoop.tramp.fn(pClientRemoteStorage, a1, a2, a3);
 	FakeAppIds::pipeLoop(true);
@@ -579,11 +585,33 @@ static void hkClientRemoteStorage_PipeLoop(void* pClientRemoteStorage, void* a1,
 
 static void hkClientUGC_PipeLoop(void* pClientUGC, void* a1, void* a2, void* a3)
 {
+	//Workshop
 	FakeAppIds::pipeLoop(false);
 	Hooks::IClientUGC_PipeLoop.tramp.fn(pClientUGC, a1, a2, a3);
 	FakeAppIds::pipeLoop(true);
+}
 
-	//g_pLog->debug("IClientUGC::PipeLoop in %u for %u\n", *g_pClientUtils->getPipeIndex(), g_pClientUtils->getAppId());
+static uint32_t hkClientUtils_GetAppId(void* pClientUtils)
+{
+	uint32_t appId = Hooks::IClientUtils_GetAppId.originalFn.fn(pClientUtils);
+
+	g_pLog->debug
+	(
+		"%s(%p) -> %u\n",
+
+		Hooks::IClientUtils_GetAppId.name.c_str(),
+		pClientUtils,
+		appId
+	);
+
+	const uint32_t real = FakeAppIds::getRealAppIdForCurrentPipe(false);
+	if(real)
+	{
+		g_pLog->debug("Overwriting appId with %u\n", real);
+		return real;
+	}
+
+	return appId;
 }
 
 static bool hkClientUtils_GetOfflineMode(void* pClientUtils)
@@ -608,7 +636,10 @@ static void hkClientUtils_PipeLoop(void* pClientUtils, void* a1, void* a2, void*
 		std::shared_ptr<lm_vmt_t> vft = std::make_shared<lm_vmt_t>();
 		LM_VmtNew(*reinterpret_cast<lm_address_t**>(pClientUtils), vft.get());
 
+		Hooks::IClientUtils_GetAppId.setup(vft, VFTIndexes::IClientUtils::GetAppId, hkClientUtils_GetAppId);
 		Hooks::IClientUtils_GetOfflineMode.setup(vft, VFTIndexes::IClientUtils::GetOfflineMode, hkClientUtils_GetOfflineMode);
+
+		Hooks::IClientUtils_GetAppId.place();
 		Hooks::IClientUtils_GetOfflineMode.place();
 
 		g_pLog->debug("IClientUtils->vft at %p\n", vft->vtable);
@@ -738,7 +769,7 @@ static uint32_t hkClientUser_GetSteamId(uint32_t steamId)
 		g_currentSteamId = steamId;
 	}
 
-	Ticket::SavedTicket ticket = Ticket::getCachedEncryptedTicket(g_pClientUtils->getAppId());
+	Ticket::SavedTicket ticket = Ticket::getCachedEncryptedTicket(FakeAppIds::getRealAppIdForCurrentPipe());
 
 	if (ticket.steamId)
 	{
@@ -796,9 +827,16 @@ static void hkClientUser_PipeLoop(void* pClientUser, void* a1, void* a2, void* a
 
 static void hkClientUserStats_PipeLoop(void* pClientUserStats, void* a1, void* a2, void* a3)
 {
+	//Achievements
 	FakeAppIds::pipeLoop(false);
 	Hooks::IClientUserStats_PipeLoop.tramp.fn(pClientUserStats, a1, a2, a3);
 	FakeAppIds::pipeLoop(true);
+}
+
+static void hkSteamMatchmakingPingResponse_ServerResponded(void* pSteamMatchingPingResponse, gameserverdetails_t* details)
+{
+	FakeAppIds::pingResponse(details);
+	Hooks::ISteamMatchmakingPingResponse_ServerResponded.tramp.fn(pSteamMatchingPingResponse, details);
 }
 
 static void patchRetn(lm_address_t address)
@@ -927,7 +965,6 @@ namespace Hooks
 
 	DetourHook<IClientAppManager_PipeLoop_t> IClientAppManager_PipeLoop;
 	DetourHook<IClientApps_PipeLoop_t> IClientApps_PipeLoop;
-	DetourHook<IClientControllerSerialized_PipeLoop_t> IClientControllerSerialized_PipeLoop;
 	DetourHook<IClientRemoteStorage_PipeLoop_t> IClientRemoteStorage_PipeLoop;
 	DetourHook<IClientUGC_PipeLoop_t> IClientUGC_PipeLoop;
 	DetourHook<IClientUtils_PipeLoop_t> IClientUtils_PipeLoop;
@@ -937,8 +974,8 @@ namespace Hooks
 	DetourHook<CProtoBufMsgBase_New_t> CProtoBufMsgBase_New;
 	DetourHook<CProtoBufMsgBase_Send_t> CProtoBufMsgBase_Send;
 
-	DetourHook<CSteamController_AddToConfigCacheHandler_t> CSteamController_AddToConfigCacheHandler;
-	DetourHook<CSteamController_QueueControllerActivation_t> CSteamController_QueueControllerActivation;
+	DetourHook<CSteamMatchmakingServers_GetServerDetails_t> CSteamMatchmakingServers_GetServerDetails;
+	DetourHook<CSteamMatchmakingServers_RequestInternetServerList_t> CSteamMatchmakingServers_RequestInternetServerList;
 
 	DetourHook<CSteamEngine_Init_t> CSteamEngine_Init;
 	DetourHook<CSteamEngine_GetAPICallResult_t> CSteamEngine_GetAPICallResult;
@@ -966,8 +1003,15 @@ namespace Hooks
 
 	VFTHook<IClientRemoteStorage_IsCloudEnabledForApp_t> IClientRemoteStorage_IsCloudEnabledForApp("IClientRemoteStorage::IsCloudEnabledForApp");
 
+	VFTHook<IClientUtils_GetAppId_t> IClientUtils_GetAppId("IClientUtils::GetAppId");
 	VFTHook<IClientUtils_GetOfflineMode_t> IClientUtils_GetOfflineMode("IClientUtils::GetOfflineMode");
 
+
+	//steamui.so
+	DetourHook<ISteamMatchmakingPingResponse_ServerResponded_t> ISteamMatchmakingPingResponse_ServerResponded;
+
+
+	//Naked
 	lm_address_t IClientUser_GetSteamId;
 }
 
@@ -983,8 +1027,8 @@ bool Hooks::setup()
 		&& CProtoBufMsgBase_New.setup(Patterns::CProtoBufMsgBase::New, &hkProtoBufMsgBase_New)
 		&& CProtoBufMsgBase_Send.setup(Patterns::CProtoBufMsgBase::Send, &hkProtoBufMsgBase_Send)
 
-		&& CSteamController_AddToConfigCacheHandler.setup(Patterns::CSteamController::AddToConfigCacheHandler, &hkSteamController_AddToConfigCacheHandler)
-		&& CSteamController_QueueControllerActivation.setup(Patterns::CSteamController::QueueControllerActivation, &hkSteamController_QueueControllerActivation)
+		&& CSteamMatchmakingServers_GetServerDetails.setup(Patterns::CSteamMatchmakingServers::GetServerDetails, &hkSteamMatchmakingServers_GetServerDetails)
+		&& CSteamMatchmakingServers_RequestInternetServerList.setup(Patterns::CSteamMatchmakingServers::RequestInternetServerList, &hkSteamMatchmakingServers_RequestInternetServerList)
 
 		&& CUser_CheckAppOwnership.setup(Patterns::CUser::CheckAppOwnership, &hkUser_CheckAppOwnership)
 		&& CUser_GetSubscribedApps.setup(Patterns::CUser::GetSubscribedApps, &hkUser_GetSubscribedApps)
@@ -997,7 +1041,6 @@ bool Hooks::setup()
 
 		&& IClientApps_PipeLoop.setup(Patterns::IClientApps::PipeLoop, hkClientApps_PipeLoop)
 		&& IClientAppManager_PipeLoop.setup(Patterns::IClientAppManager::PipeLoop, hkClientAppManager_PipeLoop)
-		&& IClientControllerSerialized_PipeLoop.setup(Patterns::IClientControllerSerialized::PipeLoop, hkClientControllerSerialized_PipeLoop)
 		&& IClientRemoteStorage_PipeLoop.setup(Patterns::IClientRemoteStorage::PipeLoop, hkClientRemoteStorage_PipeLoop)
 		&& IClientUGC_PipeLoop.setup(Patterns::IClientUGC::PipeLoop, hkClientUGC_PipeLoop)
 		&& IClientUtils_PipeLoop.setup(Patterns::IClientUtils::PipeLoop, hkClientUtils_PipeLoop)
@@ -1009,7 +1052,9 @@ bool Hooks::setup()
 		&& IClientUser_BUpdateAppOwnershipTicket.setup(Patterns::IClientUser::BUpdateAppOwnershipTicket, hkClientUser_BUpdateOwnershipTicket)
 		&& IClientUser_GetAppOwnershipTicketExtendedData.setup(Patterns::IClientUser::GetAppOwnershipTicketExtendedData, hkClientUser_GetAppOwnershipTicketExtendedData)
 		&& IClientUser_IsUserSubscribedAppInTicket.setup(Patterns::IClientUser::IsUserSubscribedAppInTicket, &hkClientUser_IsUserSubscribedAppInTicket)
-		&& IClientUser_RequiresLegacyCDKey.setup(Patterns::IClientUser::RequiresLegacyCDKey, hkClientUser_RequiresLegacyCDKey);
+		&& IClientUser_RequiresLegacyCDKey.setup(Patterns::IClientUser::RequiresLegacyCDKey, hkClientUser_RequiresLegacyCDKey)
+
+		&& ISteamMatchmakingPingResponse_ServerResponded.setup(Patterns::ISteamMatchmakingPingResponse::ServerResponded, hkSteamMatchmakingPingResponse_ServerResponded);
 
 	Hooks::place();
 	//This is unnecessary but I'll keep this for now in case I wanna improve error checks
@@ -1030,12 +1075,12 @@ void Hooks::place()
 	CProtoBufMsgBase_New.place();
 	CProtoBufMsgBase_Send.place();
 
-	CSteamController_AddToConfigCacheHandler.place();
-	CSteamController_QueueControllerActivation.place();
-
 	CSteamEngine_Init.place();
 	CSteamEngine_GetAPICallResult.place();
 	CSteamEngine_SetAppIdForCurrentPipe.place();
+
+	CSteamMatchmakingServers_GetServerDetails.place();
+	CSteamMatchmakingServers_RequestInternetServerList.place();
 
 	CUser_CheckAppOwnership.place();
 	CUser_GetSubscribedApps.place();
@@ -1045,8 +1090,8 @@ void Hooks::place()
 	IClientApps_PipeLoop.place();
 	IClientAppManager_PipeLoop.place();
 	IClientRemoteStorage_PipeLoop.place();
-	IClientUtils_PipeLoop.place();
 	IClientUGC_PipeLoop.place();
+	IClientUtils_PipeLoop.place();
 	IClientUser_PipeLoop.place();
 	IClientUserStats_PipeLoop.place();
 
@@ -1056,6 +1101,8 @@ void Hooks::place()
 	IClientUser_GetAppOwnershipTicketExtendedData.place();
 	IClientUser_IsUserSubscribedAppInTicket.place();
 	IClientUser_RequiresLegacyCDKey.place();
+
+	ISteamMatchmakingPingResponse_ServerResponded.place();
 
 	createAndPlaceSteamIdHook();
 }
@@ -1068,12 +1115,12 @@ void Hooks::remove()
 	CProtoBufMsgBase_New.remove();
 	CProtoBufMsgBase_Send.remove();
 
-	CSteamController_AddToConfigCacheHandler.remove();
-	CSteamController_QueueControllerActivation.remove();
-
 	CSteamEngine_Init.remove();
 	CSteamEngine_GetAPICallResult.remove();
 	CSteamEngine_SetAppIdForCurrentPipe.remove();
+
+	CSteamMatchmakingServers_GetServerDetails.remove();
+	CSteamMatchmakingServers_RequestInternetServerList.remove();
 
 	CUser_CheckAppOwnership.remove();
 	CUser_GetSubscribedApps.remove();
@@ -1083,8 +1130,8 @@ void Hooks::remove()
 	IClientApps_PipeLoop.remove();
 	IClientAppManager_PipeLoop.remove();
 	IClientRemoteStorage_PipeLoop.remove();
-	IClientUtils_PipeLoop.remove();
 	IClientUGC_PipeLoop.remove();
+	IClientUtils_PipeLoop.remove();
 	IClientUser_PipeLoop.remove();
 	IClientUserStats_PipeLoop.remove();
 
@@ -1094,6 +1141,8 @@ void Hooks::remove()
 	IClientUser_GetAppOwnershipTicketExtendedData.remove();
 	IClientUser_IsUserSubscribedAppInTicket.remove();
 	IClientUser_RequiresLegacyCDKey.remove();
+
+	ISteamMatchmakingPingResponse_ServerResponded.remove();
 
 	//VFT Hooks
 	IClientAppManager_BIsDlcEnabled.remove();
@@ -1105,6 +1154,8 @@ void Hooks::remove()
 	IClientApps_GetDLCCount.remove();
 
 	IClientRemoteStorage_IsCloudEnabledForApp.remove();
+
+	IClientUtils_GetAppId.remove();
 	
 	//TODO: Remove jmp
 	if (hkNakedGetSteamId != LM_ADDRESS_BAD)

@@ -17,9 +17,10 @@ public:
 	std::vector<uint8_t> prologue;
 
 	lm_address_t address;
+	lm_module_t* module;
 
-	Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode);
-	Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, std::vector<uint8_t> prologue);
+	Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, lm_module_t* module = nullptr);
+	Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, std::vector<uint8_t> prologue, lm_module_t* module = nullptr);
 	//~CPattern();
 
 	bool find();
@@ -38,13 +39,6 @@ namespace Patterns
 		extern Pattern_t Send;
 	};
 
-	//Controller config IPC handlers - intercept AppId from game process
-	namespace CSteamController
-	{
-		extern Pattern_t AddToConfigCacheHandler;
-		extern Pattern_t QueueControllerActivation;
-	}
-
 	namespace CSteamEngine
 	{
 		extern Pattern_t Init;
@@ -52,6 +46,12 @@ namespace Patterns
 		extern Pattern_t SetAppIdForCurrentPipe;
 
 		extern Pattern_t Offset_User;
+	}
+
+	namespace CSteamMatchmakingServers
+	{
+		extern Pattern_t GetServerDetails;
+		extern Pattern_t RequestInternetServerList;
 	}
 
 	namespace CUser
@@ -74,17 +74,7 @@ namespace Patterns
 		extern Pattern_t PipeLoop;
 	}
 
-	namespace IClientControllerSerialized
-	{
-		extern Pattern_t PipeLoop;
-	}
-
 	namespace IClientRemoteStorage
-	{
-		extern Pattern_t PipeLoop;
-	}
-
-	namespace IClientUGC
 	{
 		extern Pattern_t PipeLoop;
 	}
@@ -102,6 +92,11 @@ namespace Patterns
 		extern Pattern_t RequiresLegacyCDKey;
 	}
 
+	namespace IClientUGC
+	{
+		extern Pattern_t PipeLoop;
+	}
+
 	namespace IClientUserStats
 	{
 		extern Pattern_t PipeLoop;
@@ -113,6 +108,12 @@ namespace Patterns
 		extern Pattern_t Offset_GetPipeIndex;
 	}
 
+
+	//steamui.so
+	namespace ISteamMatchmakingPingResponse
+	{
+		extern Pattern_t ServerResponded;
+	}
 
 	extern std::vector<Pattern_t*> patterns;
 	bool init();

@@ -9,25 +9,26 @@
 #include <memory>
 
 
-Pattern_t::Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode)
+Pattern_t::Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, lm_module_t* module)
 	:
-	Pattern_t(name, pattern, followMode, std::vector<uint8_t>())
+	Pattern_t(name, pattern, followMode, std::vector<uint8_t>(), module)
 {
 }
 
-Pattern_t::Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, std::vector<uint8_t> prologue)
+Pattern_t::Pattern_t(const char* name, const char* pattern, MemHlp::SigFollowMode followMode, std::vector<uint8_t> prologue, lm_module_t* module)
 	:
 	name(name),
 	pattern(pattern),
 	followMode(followMode),
-	prologue(prologue)
+	prologue(prologue),
+	module(module)
 {
 	Patterns::patterns.emplace_back(this);
 }
 
 bool Pattern_t::find()
 {
-	address = MemHlp::searchSignature(name.c_str(), pattern.c_str(), g_modSteamClient, followMode, &prologue[0], prologue.size());
+	address = MemHlp::searchSignature(name.c_str(), pattern.c_str(), module ? *module : g_modSteamClient , followMode, &prologue[0], prologue.size());
 	return address != LM_ADDRESS_BAD;
 }
 
@@ -87,23 +88,6 @@ namespace Patterns
 		};
 	};
 
-	namespace CSteamController
-	{
-		Pattern_t AddToConfigCacheHandler
-		{
-			"CSteamController::AddToConfigCacheHandler",
-			"83 EC 08 FF 74 24 ? FF 74 24 ? FF 74 24 ? FF 74 24 ? FF 74 24 ? FF 74 24 ? FF 74 24 ? 8B 44 24 ? 83 C0 08",
-			SigFollowMode::PrologueUpwards,
-			std::vector<uint8_t> { 0xe8, 0x53 }
-		};
-		Pattern_t QueueControllerActivation
-		{
-			"CSteamController::QueueControllerActivation",
-			"57 56 53 8B 5C 24 ? 8B 74 24 ? 83 EC 08 8B 7C 24",
-			SigFollowMode::None,
-		};
-	}
-
 	namespace CSteamEngine
 	{
 		Pattern_t Init
@@ -129,6 +113,24 @@ namespace Patterns
 			"CSteamEngine::m_pUser",
 			"8B 80 ? ? ? ? FF 75 ? 8D 34",
 			SigFollowMode::None
+		};
+	}
+
+	namespace CSteamMatchmakingServers
+	{
+		Pattern_t GetServerDetails
+		{
+			"CSteamMatchmakingServers::GetServerDetails",
+			"89 45 ? 83 C4 10 83 EC 0C 89 F3",
+			SigFollowMode::PrologueUpwards,
+			std::vector<uint8_t> { 0x56, 0x57, 0xe5, 0x89, 0x55 }
+		};
+		Pattern_t RequestInternetServerList
+		{
+			"CSteamMatchmakingServers::RequestInternetServerList",
+			"C7 04 24 50 03 00 00 E8 ? ? ? ? 5A 89 45 ? 59 FF B6 ? ? ? ? FF B6 ? ? ? ? FF B6 ? ? ? ? FF B6 ? ? ? ? FF B6 ? ? ? ? 6A 01",
+			SigFollowMode::PrologueUpwards,
+			std::vector<uint8_t> { 0xe8, 0x57, 0xe5, 0x89, 0x55 }
 		};
 	}
 
@@ -183,18 +185,7 @@ namespace Patterns
 		Pattern_t PipeLoop
 		{
 			"IClientApps::PipeLoop",
-			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 43 08 00 00",
-			SigFollowMode::PrologueUpwards,
-			std::vector<uint8_t> { 0x56, 0x57, 0xe5, 0x89, 0x55 }
-		};
-	}
-
-	namespace IClientControllerSerialized
-	{
-		Pattern_t PipeLoop
-		{
-			"IClientControllerSerialized::PipeLoop",
-			"FF B5 ? ? ? ? 50 8D 83 ? ? ? ? 68 58 15 00 00",
+			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 44 08 00 00",
 			SigFollowMode::PrologueUpwards,
 			std::vector<uint8_t> { 0x56, 0x57, 0xe5, 0x89, 0x55 }
 		};
@@ -216,7 +207,7 @@ namespace Patterns
 		Pattern_t PipeLoop
 		{
 			"IClientUser::PipeLoop",
-			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 46 01 00 00",
+			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 F4 02 00 00",
 			SigFollowMode::PrologueUpwards,
 			std::vector<uint8_t> { 0x56, 0x57, 0xe5, 0x89, 0x55 }
 		};
@@ -274,7 +265,7 @@ namespace Patterns
 		Pattern_t PipeLoop
 		{
 			"IClientUGC::PipeLoop",
-			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 76 11 00 00",
+			"FF B5 ? ? ? ? 50 8D 86 ? ? ? ? 68 F6 11 00 00",
 			SigFollowMode::PrologueUpwards,
 			std::vector<uint8_t> { 0x56, 0x57, 0xe5, 0x89, 0x55 }
 		};
@@ -305,6 +296,19 @@ namespace Patterns
 			"IClientUtils::m_PipeIndex",
 			"8B 91 ? ? ? ? 83 F8 FF 74 ? 8B 89 ? ? ? ? EB ? ? ? ? 8B 00 83 F8 FF 74 ? 8D 04 ? 8D 04 ? 3B 50",
 			SigFollowMode::None,
+		};
+	}
+
+	//steamui.so
+	namespace ISteamMatchmakingPingResponse
+	{
+		Pattern_t ServerResponded
+		{
+			"ISteamMatchmakingPingResponse::ServerResponded",
+			"8B 85 ? ? ? ? 8B 40 ? 85 C0 0F 84 ? ? ? ? 39 46",
+			SigFollowMode::PrologueUpwards,
+			std::vector<uint8_t> { 0x57, 0xe5, 0x89, 0x55 },
+			&g_modSteamUI
 		};
 	}
 

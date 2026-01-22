@@ -3,11 +3,13 @@
 #include "../config.hpp"
 
 #include "../sdk/CSteamEngine.hpp"
+#include "../sdk/CSteamMatchmakingServers.hpp"
 #include "../sdk/CUser.hpp"
 #include "../sdk/IClientUtils.hpp"
 
-
 std::unordered_map<uint32_t, uint32_t> FakeAppIds::fakeAppIdMap = std::unordered_map<uint32_t, uint32_t>();
+std::unordered_map<uint32_t, uint32_t> FakeAppIds::fakeAppIdMapServer = std::unordered_map<uint32_t, uint32_t>();
+std::unordered_map<uint64_t, uint32_t> FakeAppIds::fakeAppIdMapPings = std::unordered_map<uint64_t, uint32_t>();
 
 uint32_t FakeAppIds::getFakeAppId(uint32_t appId)
 {
@@ -25,7 +27,7 @@ uint32_t FakeAppIds::getFakeAppId(uint32_t appId)
 	return 0;
 }
 
-uint32_t FakeAppIds::getRealAppId()
+uint32_t FakeAppIds::getRealAppIdForCurrentPipe(bool fallback)
 {
 	uint32_t hPipe = *g_pClientUtils->getPipeIndex();
 	if (fakeAppIdMap.contains(hPipe))
@@ -33,13 +35,19 @@ uint32_t FakeAppIds::getRealAppId()
 		return fakeAppIdMap[hPipe];
 	}
 
-	return g_pClientUtils->getAppId();
+	if (fallback)
+	{
+		return g_pClientUtils->getAppId();
+	}
+
+	return 0;
 }
 
 void FakeAppIds::setAppIdForCurrentPipe(uint32_t& appId)
 {
 	//Keep track of every AppId, for various reasons
 	fakeAppIdMap[*g_pClientUtils->getPipeIndex()] = appId;
+	g_pLog->debug("fakeAppIdMap[%p] = %u\n", *g_pClientUtils->getPipeIndex(), appId);
 
 	//Do not change Steam Client itself (AppId 0)
 	if (!appId)
@@ -57,7 +65,7 @@ void FakeAppIds::setAppIdForCurrentPipe(uint32_t& appId)
 
 void FakeAppIds::pipeLoop(bool post)
 {
-	uint32_t appId = getRealAppId();
+	uint32_t appId = getRealAppIdForCurrentPipe(false);
 	uint32_t fakeAppId = getFakeAppId(appId);
 
 	if (!appId || !fakeAppId || appId == fakeAppId)
@@ -74,22 +82,45 @@ void FakeAppIds::pipeLoop(bool post)
 	g_pSteamEngine->setAppIdForCurrentPipe(appId);
 }
 
-void FakeAppIds::overwriteAppIdIfNecessary(uint32_t& appId)
+void FakeAppIds::getServerDetails(uint32_t handle, gameserverdetails_t& details)
 {
-	//Don't use getRealAppid here! Returns 0
+	if (!fakeAppIdMapServer.contains(handle))
+	{
+		return;
+	}
+
+	const uint32_t realAppId = fakeAppIdMapServer[handle];
+
+	fakeAppIdMapPings[*reinterpret_cast<uint64_t*>(&details.address)] = realAppId;
+	details.appId = realAppId;
+
+	g_pLog->debug("Changing appId back to %u\n", realAppId);
+}
+
+uint32_t FakeAppIds::requestInternetServerList(uint32_t appId)
+{
 	const uint32_t fake = getFakeAppId(appId);
+	if (!fake)
+	{
+		return 0;
+	}
 
-	if (!appId || !fake || appId == fake)
+	g_pLog->debug("Replacing %u with %u\n", appId, fake);
+	return fake;
+}
+
+void FakeAppIds::pingResponse(gameserverdetails_t *details)
+{
+	if (!details)
 	{
 		return;
 	}
 
-	//Exclude Steam Big Picture mode & Steam Controller Configs - Desktop. Causes issues with SteamInput
-	if(appId == 769 || appId == 413080)
+	const uint64_t ip = *reinterpret_cast<uint64_t*>(&details->address);
+	if (!fakeAppIdMapPings.contains(ip))
 	{
 		return;
 	}
 
-	g_pLog->debug("FakeAppIds::overwriteAppIdIfNecessary overwriting %u with %u\n", appId, fake);
-	appId = fake;
+	details->appId = fakeAppIdMapPings[ip];
 }

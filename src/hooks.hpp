@@ -9,6 +9,8 @@
 class CAppOwnershipInfo;
 class CProtoBufMsgBase;
 
+struct gameserverdetails_t;
+
 struct Pattern_t;
 
 template<typename T>
@@ -72,7 +74,6 @@ namespace Hooks
 
 	typedef void(*IClientAppManager_PipeLoop_t)(void*, void*, void*, void*);
 	typedef void(*IClientApps_PipeLoop_t)(void*, void*, void*, void*);
-	typedef void(*IClientControllerSerialized_PipeLoop_t)(void*, void*, void*, void*);
 	typedef void(*IClientRemoteStorage_PipeLoop_t)(void*, void*, void*, void*);
 	typedef void(*IClientUGC_PipeLoop_t)(void*, void*, void*, void*);
 	typedef void(*IClientUtils_PipeLoop_t)(void*, void*, void*, void*);
@@ -82,12 +83,12 @@ namespace Hooks
 	typedef void(*CProtoBufMsgBase_New_t)(CProtoBufMsgBase*, void*);
 	typedef uint32_t(*CProtoBufMsgBase_Send_t)(CProtoBufMsgBase*);
 
-	typedef void(*CSteamController_AddToConfigCacheHandler_t)(void*, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t);
-	typedef void(*CSteamController_QueueControllerActivation_t)(void*, uint32_t, uint32_t, uint8_t);
-
 	typedef void(*CSteamEngine_Init_t)(void*);
 	typedef bool(*CSteamEngine_GetAPICallResult_t)(void*, uint32_t, uint32_t, void*, uint32_t, uint32_t, bool*);
 	typedef uint32_t(*CSteamEngine_SetAppIdForCurrentPipe_t)(void*, uint32_t, bool);
+
+	typedef gameserverdetails_t*(*CSteamMatchmakingServers_GetServerDetails_t)(void*, uint32_t, uint32_t);
+	typedef uint32_t(*CSteamMatchmakingServers_RequestInternetServerList_t)(void*, uint32_t, uint32_t, uint32_t, uint32_t);
 
 	typedef uint32_t(*CUser_CheckAppOwnership_t)(void*, uint32_t, CAppOwnershipInfo*);
 	typedef uint32_t(*CUser_GetSubscribedApps_t)(void*, uint32_t*, uint32_t, uint8_t);
@@ -107,12 +108,11 @@ namespace Hooks
 	extern DetourHook<CProtoBufMsgBase_New_t> CProtoBufMsgBase_New;
 	extern DetourHook<CProtoBufMsgBase_Send_t> CProtoBufMsgBase_Send;
 
-	extern DetourHook<CSteamController_AddToConfigCacheHandler_t> CSteamController_AddToConfigCacheHandler;
-	extern DetourHook<CSteamController_QueueControllerActivation_t> CSteamController_QueueControllerActivation;
+	extern DetourHook<CSteamMatchmakingServers_GetServerDetails_t> CSteamMatchmakingServers_GetServerDetails;
+	extern DetourHook<CSteamMatchmakingServers_RequestInternetServerList_t> CSteamMatchmakingServers_RequestInternetServerList;
 
 	extern DetourHook<IClientAppManager_PipeLoop_t> IClientAppManager_PipeLoop;
 	extern DetourHook<IClientApps_PipeLoop_t> IClientApps_PipeLoop;
-	extern DetourHook<IClientControllerSerialized_PipeLoop_t> IClientControllerSerialized_PipeLoop;
 	extern DetourHook<IClientRemoteStorage_PipeLoop_t> IClientRemoteStorage_PipeLoop;
 	extern DetourHook<IClientUGC_PipeLoop_t> IClientUGC_PipeLoop;
 	extern DetourHook<IClientUtils_PipeLoop_t> IClientUtils_PipeLoop;
@@ -142,6 +142,7 @@ namespace Hooks
 	typedef unsigned int(*IClientApps_GetDLCCount_t)(void*, uint32_t);
 	typedef bool(*IClientApps_GetDLCDataByIndex_t)(void*, uint32_t, int, uint32_t*, bool*, char*, size_t);
 	typedef bool(*IClientRemoteStorage_IsCloudEnabledForApp_t)(void*, uint32_t);
+	typedef uint32_t(*IClientUtils_GetAppId_t)(void*);
 
 	extern VFTHook<IClientAppManager_BIsDlcEnabled_t> IClientAppManager_BIsDlcEnabled;
 	extern VFTHook<IClientAppManager_GetAppUpdateInfo_t> IClientAppManager_GetAppUpdateInfo;
@@ -153,8 +154,17 @@ namespace Hooks
 
 	extern VFTHook<IClientRemoteStorage_IsCloudEnabledForApp_t> IClientRemoteStorage_IsCloudEnabledForApp;
 
+	extern VFTHook<IClientUtils_GetAppId_t> IClientUtils_GetAppId;
 	extern VFTHook<IClientUtils_GetOfflineMode_t> IClientUtils_GetOfflineMode;
 
+	typedef void(*ISteamMatchmakingPingResponse_ServerResponded_t)(void*, gameserverdetails_t*);
+
+
+	//steamui.so
+	extern DetourHook<ISteamMatchmakingPingResponse_ServerResponded_t> ISteamMatchmakingPingResponse_ServerResponded;
+
+
+	//Naked
 	extern lm_address_t IClientUser_GetSteamId;
 
 	bool setup();
